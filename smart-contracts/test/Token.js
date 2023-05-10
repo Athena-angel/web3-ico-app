@@ -151,8 +151,11 @@ describe("Token contract", function () {
       console.log("claim finished");
       // console.log(addr1);
       const bal = await hardhatICO.getDepositedAmountOf(addr1.address);
+      const tokenprice = await hardhatICO.tokenPrice();
       // console.log("Addr1 balance: ", bal);
-      expect(await hardhatToken.balanceOf(addr1.address)).to.equals(bal);
+      expect(await hardhatToken.balanceOf(addr1.address)).to.equals(
+        bal / tokenprice
+      );
     });
 
     it("User can withdraw when ICO was failed", async function () {

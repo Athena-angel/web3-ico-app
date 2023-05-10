@@ -2,10 +2,11 @@
 pragma solidity 0.8.16;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/utils/Strings.sol";
 
 contract StknICO {
     //Administration Details
-    address public admin;
+    address public owner;
     address payable public ICOWallet;
 
     //Token
@@ -13,168 +14,121 @@ contract StknICO {
 
     //ICO Details
     uint public tokenPrice = 0.0001 ether;
-    uint public hardCap = 500 ether;
-    uint public raisedAmount;
+    uint public hardCap = 1 ether;
+    uint public softCap = 0.1 ether;
     uint public minInvestment = 0.001 ether;
-    uint public maxInvestment = 3 ether;
+    uint public maxInvestment = 0.5 ether;
+    uint public raisedAmount = 0 ether;
     uint public icoStartTime;
     uint public icoEndTime;
 
     //Investor
-    mapping(address => uint) public investedAmountOf;
-
-    //ICO State
-    enum State {
-        BEFORE,
-        RUNNING,
-        END,
-        HALTED
-    }
-    State public ICOState;
+    mapping(address => uint256) public depositedAmountOf;
 
     //Events
-    event Invest(
+    event Deposit(
         address indexed from,
-        address indexed to,
-        uint value,
-        uint tokens
+        uint value
     );
-    event TokenBurn(address to, uint amount, uint time);
+
+    event Withdraw(address from, uint256 value);
+    event Claim(address from, uint256 value);
+    event OwnerWithdraw(uint256 amount);
 
     //Initialize Variables
-    constructor(address payable _icoWallet, address _token) {
-        admin = msg.sender;
-        ICOWallet = _icoWallet;
+    // constructor(address payable _icoWallet, address _token, uint256 _startTime, uint256 _endTime) {
+    constructor(address _token, uint256 _startTime, uint256 _endTime) {
+        owner = msg.sender;
+        // ICOWallet = _icoWallet;
+
+        icoStartTime = _startTime;
+        icoEndTime = _endTime;
+
         token = IERC20(_token);
     }
 
     //Access Control
-    modifier onlyAdmin() {
-        require(msg.sender == admin, "Admin Only function");
+    modifier onlyOwner() {
+        require(msg.sender == owner, "ONLY_OWNER");
         _;
     }
 
     //Receive Ether Directly
     receive() external payable {
-        invest();
+        // deposit();
     }
 
-    fallback() external payable {
-        invest();
-    }
+    // //Change ICO Wallet
+    // function changeICOWallet(address payable _newICOWallet) external onlyOwner {
+    //     ICOWallet = _newICOWallet;
+    // }
 
-    /* Functions */
-
-    //Get ICO State
-    function getICOState() external view returns (string memory) {
-        if (ICOState == State.BEFORE) {
-            return "Not Started";
-        } else if (ICOState == State.RUNNING) {
-            return "Running";
-        } else if (ICOState == State.END) {
-            return "End";
-        } else {
-            return "Halted";
-        }
-    }
-
-    /* Admin Functions */
-
-    //Start, Halt and End ICO
-    function startICO() external onlyAdmin {
-        require(ICOState == State.BEFORE, "ICO isn't in before state");
-
-        icoStartTime = block.timestamp;
-        icoEndTime = icoStartTime + (86400 * 365);
-        ICOState = State.RUNNING;
-    }
-
-    function haltICO() external onlyAdmin {
-        require(ICOState == State.RUNNING, "ICO isn't running yet");
-        ICOState = State.HALTED;
-    }
-
-    function resumeICO() external onlyAdmin {
-        require(ICOState == State.HALTED, "ICO State isn't halted yet");
-        ICOState = State.RUNNING;
-    }
-
-    //Change ICO Wallet
-    function changeICOWallet(address payable _newICOWallet) external onlyAdmin {
-        ICOWallet = _newICOWallet;
-    }
-
-    //Change Admin
-    function changeAdmin(address _newAdmin) external onlyAdmin {
-        admin = _newAdmin;
+    //Change Owner
+    function changeOwner(address _newOwner) external onlyOwner {
+        owner = _newOwner;
     }
 
     /* User Function */
     
-    //Invest
-    function invest() public payable returns (bool) {
-        require(ICOState == State.RUNNING, "ICO isn't running");
+    //deposit
+    function deposit() public payable {
+        // require(ICOState == State.RUNNING, "ICO isn't running");
+        require(block.timestamp >= icoStartTime && block.timestamp < icoEndTime, "ICO_NOT_IN_PROGRESS");
         require(
-            msg.value >= minInvestment && msg.value <= maxInvestment,
+            msg.value >= minInvestment && depositedAmountOf[msg.sender] + msg.value <= maxInvestment,
             "Check Min and Max Investment"
         );
-        require(
-            investedAmountOf[msg.sender] + msg.value <= maxInvestment,
-            "Investor reached maximum Investment Amount"
-        );
+
+        raisedAmount = address(this).balance;
 
         require(
             raisedAmount + msg.value <= hardCap,
             "Send within hardcap range"
         );
-        require(
-            block.timestamp <= icoEndTime,
-            "ICO already Reached Maximum time limit"
-        );
 
-        raisedAmount += msg.value;
-        investedAmountOf[msg.sender] += msg.value;
+        depositedAmountOf[msg.sender] += msg.value;
 
-        (bool transferSuccess, ) = ICOWallet.call{value: msg.value}("");
-        require(transferSuccess, "Failed to Invest");
+        emit Deposit(msg.sender, msg.value);
+        // return true;
+    }
 
-        uint tokens = (msg.value / tokenPrice) * 1e18;
-        bool saleSuccess = token.transfer(msg.sender, tokens);
-        require(saleSuccess, "Failed to Invest");
+    //Withdraw BNB
+    function withdraw() external returns(bool){
+        raisedAmount = address(this).balance;
+        require(raisedAmount < softCap && block.timestamp > icoEndTime, "NOT_WITHDRAWABLE");
 
-        emit Invest(address(this), msg.sender, msg.value, tokens);
+        uint256 depositAmt = depositedAmountOf[msg.sender];
+
+        require(depositAmt > 0, "ZERO_DEPOSIT");
+        require(depositAmt <= address(this).balance, "EXCEED_TOTAL_DEPOSIT");
+
+        msg.sender.call{value: depositAmt}("");
+
+        emit Withdraw(msg.sender, depositAmt);
         return true;
     }
 
-    //Burn Tokens
-    function burn() external returns (bool) {
-        require(ICOState == State.END, "ICO isn't over yet");
+    function claim() external {
+        raisedAmount = address(this).balance;
+        require(raisedAmount > softCap && block.timestamp > icoEndTime || raisedAmount > hardCap, "NOT_CLAIMABLE");
 
-        uint remainingTokens = token.balanceOf(address(this));
-        bool success = token.transfer(address(0), remainingTokens);
-        require(success, "Failed to burn remaining tokens");
-
-        emit TokenBurn(address(0), remainingTokens, block.timestamp);
-        return true;
+        uint256 tokenAmt = depositedAmountOf[msg.sender];
+        // uint256 tokenAmt = depositedAmountOf[msg.sender] * tokenPrice;
+        token.transfer(msg.sender, tokenAmt / tokenPrice);
+         
+        emit Claim(msg.sender, tokenAmt);
     }
 
-    //End ICO After reaching Hardcap or ICO Timelimit
-    function endIco() public {
-        require(ICOState == State.RUNNING, "ICO Should be in Running State");
-        require(
-            block.timestamp > icoEndTime || raisedAmount >= hardCap,
-            "ICO Hardcap or timelimit not reached"
-        );
-        ICOState = State.END;
+    function ownerWithdraw() external onlyOwner {
+        raisedAmount = address(this).balance;
+        require(raisedAmount > softCap && block.timestamp > icoEndTime || raisedAmount > hardCap, "NOT_CLAIMABLE");
+        owner.call{value: raisedAmount}("");
+        // token.transfer(owner, ) 
+
+        emit OwnerWithdraw(raisedAmount);
     }
 
-    //Check ICO Contract Token Balance
-    function getICOTokenBalance() external view returns (uint) {
-        return token.balanceOf(address(this));
-    }
-
-    //Check ICO Contract Investor Token Balance
-    function investorBalanceOf(address _investor) external view returns (uint) {
-        return token.balanceOf(_investor);
+    function getDepositedAmountOf(address addr) public view returns (uint) {
+        return depositedAmountOf[addr];
     }
 }

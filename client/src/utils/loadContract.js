@@ -3,7 +3,7 @@ import { stakingICOAddress, stakingICOAbi } from "./constants";
 import { toast } from "react-toastify";
 
 async function loadContract(signer, chainId, setContract, address) {
-  if (chainId !== 5) {
+  if (chainId !== 31337) {
     toast.error(
       "Please Change your network to Goerli Network for Buying Tokens"
     );
